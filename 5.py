@@ -3,7 +3,7 @@
 # JUAN + GROK 4 – VERSI YANG BENER-BENER SELESAI!
 # ============================================================================
 import streamlit as st
-import folium
+#import folium
 from streamlit_folium import st_folium
 import json
 import pandas as pd
