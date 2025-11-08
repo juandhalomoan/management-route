@@ -1,44 +1,37 @@
 # ============================================================================
-# FILE: multi_stop_optimizer_v10.py → FIX ALL ERRORS + 2 JAM PERSISTENT
-# AUTHOR: Juan + Grok 4 (FINAL FIXED VERSION)
+# FILE: multi_stop_optimizer_v11_1_FULL_KLIKABLE.py
+# FITUR: SEMUA LINK & MARKER BISA DIKLIK! + TAMPILAN PRO
 # ============================================================================
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
+import pandas as pd
 import json
 import requests
 import re
 from datetime import datetime, timedelta
 from math import radians, sin, cos, asin, sqrt
-from pathlib import Path
 
-# ----------------------------------------------------------------------------
-# SETUP
-# ----------------------------------------------------------------------------
-st.set_page_config(page_title="Smart Route v10 - Final Fixed", layout="wide")
-st.title("Smart Route Optimizer v10")
-st.caption("Data tersimpan 2 jam • Refresh aman • Clear kapan saja!")
+st.set_page_config(page_title="Smart Route v11.1 - SEMUA KLIKABLE", layout="wide")
+st.title("Smart Route Optimizer v11.1")
+st.caption("PER TRIP • SEMUA BISA DIKLIK • Data 2 Jam • Pro Banget!")
 
-# ----------------------------------------------------------------------------
-# INISIALISASI SESSION STATE (WAJIB!)
-# ----------------------------------------------------------------------------
-required_keys = ["route_data", "map_obj", "driver_loc", "saved_data"]
+# ============================================================================
+# SESSION STATE & LOCALSTORAGE 2 JAM
+# ============================================================================
+required_keys = ["trips_data", "driver_loc", "map_obj"]
 for key in required_keys:
     if key not in st.session_state:
         st.session_state[key] = None
 
-# ----------------------------------------------------------------------------
-# LOCALSTORAGE AUTO SAVE (HANYA DATA JSON!)
-# ----------------------------------------------------------------------------
-STORAGE_KEY = "smart_route_v10_data"
+STORAGE_KEY = "smart_route_v111_klikable"
 EXPIRY_HOURS = 2
 
 def save_to_storage(data):
     expiry = (datetime.now() + timedelta(hours=EXPIRY_HOURS)).isoformat()
-    data_with_expiry = {"data": data, "expiry": expiry}
     js = f'''
     <script>
-    localStorage.setItem("{STORAGE_KEY}", JSON.stringify({json.dumps(data_with_expiry)}));
+    localStorage.setItem("{STORAGE_KEY}", JSON.stringify({json.dumps({"data": data, "expiry": expiry})}));
     </script>
     '''
     st.components.v1.html(js, height=0)
@@ -50,7 +43,7 @@ def load_from_storage():
     if (item) {{
         const parsed = JSON.parse(item);
         if (new Date(parsed.expiry) > new Date()) {{
-            window.parent.postMessage({{type: "LOADED_DATA", data: parsed.data}}, "*");
+            window.parent.postMessage({{type: "LOADED_V111", data: parsed.data}}, "*");
         }} else {{
             localStorage.removeItem("{STORAGE_KEY}");
         }}
@@ -60,42 +53,26 @@ def load_from_storage():
     return st.components.v1.html(js, height=0)
 
 def clear_storage():
-    js = f'''
-    <script>
-    localStorage.removeItem("{STORAGE_KEY}");
-    </script>
-    '''
+    js = '<script>localStorage.removeItem("smart_route_v111_klikable");</script>'
     st.components.v1.html(js, height=0)
 
-# ----------------------------------------------------------------------------
-# LOAD DATA DARI LOCALSTORAGE
-# ----------------------------------------------------------------------------
-loaded = load_from_storage()
+load_from_storage()
+if st.session_state.get("LOADED_V111"):
+    loaded = st.session_state["LOADED_V111"]
+    st.session_state.trips_data = loaded.get("trips_data")
+    st.session_state.driver_loc = loaded.get("driver_loc")
 
-# Jika ada pesan dari JS
-if st.session_state.get("LOADED_DATA"):
-    loaded_data = st.session_state["LOADED_DATA"]
-    st.session_state.route_data = loaded_data.get("route_data")
-    st.session_state.driver_loc = loaded_data.get("driver_loc")
-    st.session_state.saved_data = loaded_data
-    # Restore input driver
-    if loaded_data.get("driver_loc"):
-        st.session_state.driver_lat_input = loaded_data["driver_loc"][0]
-        st.session_state.driver_lon_input = loaded_data["driver_loc"][1]
-
-# ----------------------------------------------------------------------------
-# UTILITY FUNCTIONS
-# ----------------------------------------------------------------------------
+# ============================================================================
+# UTILITY
+# ============================================================================
 def extract_lat_lon_from_gmaps(url):
     try:
         r = requests.get(url, allow_redirects=True, timeout=5)
         final_url = r.url
         match = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
-        if match:
-            return float(match.group(1)), float(match.group(2))
+        if match: return float(match.group(1)), float(match.group(2))
         match2 = re.search(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)', final_url)
-        if match2:
-            return float(match2.group(1)), float(match2.group(2))
+        if match2: return float(match2.group(1)), float(match2.group(2))
         return None, None
     except:
         return None, None
@@ -109,53 +86,15 @@ def haversine(lat1, lon1, lat2, lon2):
     c = 2 * asin(sqrt(a))
     return R * c
 
-def generate_gmaps_url(points):
-    base = "https://www.google.com/maps/dir/?api=1"
-    origin = f"{points[0][0]},{points[0][1]}"
-    destination = f"{points[-1][0]},{points[-1][1]}"
-    waypoints = "|".join([f"{p[0]},{p[1]}" for p in points[1:-1]]) if len(points) > 2 else ""
-    return f"{base}&origin={origin}&destination={destination}&waypoints={waypoints}&travelmode=driving"
+def gmaps_link(lat, lon, label=""):
+    return f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
 
-# ----------------------------------------------------------------------------
-# REBUILD MAP DARI DATA (kalau ada)
-# ----------------------------------------------------------------------------
-def rebuild_map(route_data):
-    if not route_data:
-        return None
-    driver_loc = route_data["driver_loc"]
-    m = folium.Map(location=driver_loc, zoom_start=13, tiles="CartoDB positron")
+def gmaps_trip(origin_lat, origin_lon, pickup_lat, pickup_lon, delivery_lat, delivery_lon):
+    return f"https://www.google.com/maps/dir/?api=1&origin={origin_lat},{origin_lon}&destination={delivery_lat},{delivery_lon}&waypoints={pickup_lat},{pickup_lon}&travelmode=driving"
 
-    # Marker Driver
-    folium.Marker(
-        driver_loc,
-        popup=folium.Popup(f"<b style='color:#0066FF;'>DRIVER</b><br><a href='https://www.google.com/maps/search/?api=1&query={driver_loc[0]},{driver_loc[1]}' target='_blank'>Buka Maps</a>", max_width=300),
-        tooltip="Kamu",
-        icon=folium.Icon(color="blue", icon="motorcycle", prefix='fa')
-    ).add_to(m)
-
-    # Marker titik lain
-    route = route_data["route"]
-    for label, lat, lon in route[1:]:
-        is_pickup = "Pickup" in label
-        color = "green" if is_pickup else "red"
-        icon_name = "arrow-up" if is_pickup else "arrow-down"
-        folium.Marker(
-            [lat, lon],
-            popup=folium.Popup(f"<b style='color:{'#0f0' if is_pickup else '#f00'}'>{label}</b><br>{lat:.6f}, {lon:.6f}", max_width=300),
-            tooltip=label,
-            icon=folium.Icon(color=color, icon=icon_name, prefix='fa')
-        ).add_to(m)
-
-    folium.PolyLine(
-        [(p[1], p[2]) for p in route],
-        color="#0066FF", weight=7, opacity=0.9
-    ).add_to(m)
-
-    return m
-
-# ----------------------------------------------------------------------------
+# ============================================================================
 # SIDEBAR
-# ----------------------------------------------------------------------------
+# ============================================================================
 with st.sidebar:
     st.header("Posisi Driver")
     if st.button("Gunakan GPS", type="primary"):
@@ -163,163 +102,235 @@ with st.sidebar:
         <script>
         navigator.geolocation.getCurrentPosition(
             pos => {
-                const lat = pos.coords.latitude;
-                const lon = pos.coords.longitude;
-                document.querySelector('[data-testid="stNumberInput"][key="driver_lat_input"] input').value = lat;
-                document.querySelector('[data-testid="stNumberInput"][key="driver_lon_input"] input').value = lon;
-                Streamlit.setComponentValue("gps_done");
+                const inputs = document.querySelectorAll('input[type="number"]');
+                inputs[0].value = pos.coords.latitude;
+                inputs[1].value = pos.coords.longitude;
+                inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+                inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
             },
-            err => alert("GPS gagal: " + err.message)
+            err => alert("GPS Error: " + err.message)
         );
         </script>
         '''
         st.components.v1.html(js, height=0)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        driver_lat = st.number_input("Lat Driver", value=st.session_state.get("driver_lat_input", -6.2088), format="%.6f", key="driver_lat_input")
-    with col2:
-        driver_lon = st.number_input("Lon Driver", value=st.session_state.get("driver_lon_input", 106.8456), format="%.6f", key="driver_lon_input")
-    
-    driver_location = (driver_lat, driver_lon)
-    st.session_state.driver_loc = driver_location
+    c1, c2 = st.columns(2)
+    with c1:
+        driver_lat = st.number_input("Lat", value=st.session_state.get("driver_lat_input", -6.2088), format="%.6f", key="driver_lat")
+    with c2:
+        driver_lon = st.number_input("Lon", value=st.session_state.get("driver_lon_input", 106.8456), format="%.6f", key="driver_lon")
+    driver_loc = (driver_lat, driver_lon)
+    st.session_state.driver_loc = driver_loc
 
     st.divider()
-    st.header("Jumlah Order")
-    num_orders = st.number_input("Order", 1, 5, 3, key="num_orders")
+    num_orders = st.number_input("Jumlah Order", 1, 6, 3, key="num_orders")
 
-# ----------------------------------------------------------------------------
-# INPUT ORDER
-# ----------------------------------------------------------------------------
+# ============================================================================
+# INPUT ORDERS
+# ============================================================================
 orders = []
 for i in range(num_orders):
     with st.expander(f"Order {i+1}", expanded=True):
         col1, col2 = st.columns(2)
+        p_lat = p_lon = d_lat = d_lon = None
+
         with col1:
             st.subheader("Pickup")
-            input_type_p = st.radio("Pickup", ["Link Maps", "Manual"], key=f"ip_{i}", horizontal=True)
-            p_lat = p_lon = None
-            if input_type_p == "Link Maps":
-                link = st.text_input("Link Pickup", key=f"lp_{i}")
+            if st.radio("Pickup", ["Manual", "Link"], key=f"p_{i}", horizontal=True) == "Link":
+                link = st.text_input("Link Maps Pickup", key=f"pl_{i}")
                 if link:
                     lat, lon = extract_lat_lon_from_gmaps(link)
                     if lat:
                         st.success(f"{lat:.6f}, {lon:.6f}")
                         p_lat, p_lon = lat, lon
-                        st.number_input("Lat", value=lat, disabled=True, key=f"_lp_lat_{i}")
-                        st.number_input("Lon", value=lon, disabled=True, key=f"_lp_lon_{i}")
-                    else:
-                        st.error("Link salah")
-            else:
-                p_lat = st.number_input("Lat", value=-6.175, format="%.6f", key=f"plat_{i}")
-                p_lon = st.number_input("Lon", value=106.865, format="%.6f", key=f"plon_{i}")
-        
+            if not p_lat:
+                p_lat = st.number_input("Lat Pickup", format="%.6f", key=f"plat_{i}", value=-6.175)
+                p_lon = st.number_input("Lon Pickup", format="%.6f", key=f"plon_{i}", value=106.865)
+
         with col2:
             st.subheader("Delivery")
-            input_type_d = st.radio("Delivery", ["Link Maps", "Manual"], key=f"id_{i}", horizontal=True)
-            d_lat = d_lon = None
-            if input_type_d == "Link Maps":
-                link = st.text_input("Link Delivery", key=f"ld_{i}")
+            if st.radio("Delivery", ["Manual", "Link"], key=f"d_{i}", horizontal=True) == "Link":
+                link = st.text_input("Link Maps Delivery", key=f"dl_{i}")
                 if link:
                     lat, lon = extract_lat_lon_from_gmaps(link)
                     if lat:
                         st.success(f"{lat:.6f}, {lon:.6f}")
                         d_lat, d_lon = lat, lon
-                        st.number_input("Lat", value=lat, disabled=True, key=f"_ld_lat_{i}")
-                        st.number_input("Lon", value=lon, disabled=True, key=f"_ld_lon_{i}")
-                    else:
-                        st.error("Link salah")
-            else:
-                d_lat = st.number_input("Lat", value=-6.200, format="%.6f", key=f"dlat_{i}")
-                d_lon = st.number_input("Lon", value=106.845, format="%.6f", key=f"dlon_{i}")
-        
-        orders.append({"pickup": (p_lat, p_lon), "delivery": (d_lat, d_lon)})
+            if not d_lat:
+                d_lat = st.number_input("Lat Delivery", format="%.6f", key=f"dlat_{i}", value=-6.200)
+                d_lon = st.number_input("Lon Delivery", format="%.6f", key=f"dlon_{i}", value=106.845)
 
-# ----------------------------------------------------------------------------
-# HITUNG RUTE
-# ----------------------------------------------------------------------------
-if st.button("HITUNG RUTE", type="primary", use_container_width=True):
-    with st.spinner("Sedang menghitung..."):
-        all_points = [("Driver", driver_location[0], driver_location[1])]
-        for idx, o in enumerate(orders):
-            if not o["pickup"][0] or not o["delivery"][0]:
-                st.error(f"Order {idx+1} belum lengkap!")
-                st.stop()
-            all_points.append((f"Pickup {idx+1}", o["pickup"][0], o["pickup"][1]))
-            all_points.append((f"Delivery {idx+1}", o["delivery"][0], o["delivery"][1]))
+        if p_lat and d_lat:
+            orders.append({
+                "pickup": (p_lat, p_lon),
+                "delivery": (d_lat, d_lon),
+                "label": f"Order {i+1}"
+            })
 
-        route = [all_points[0]]
-        remaining = all_points[1:]
+# ============================================================================
+# HITUNG RUTE PER TRIP
+# ============================================================================
+if st.button("HITUNG RUTE PER TRIP", type="primary", use_container_width=True):
+    if not orders:
+        st.error("Isi minimal 1 order!")
+        st.stop()
+
+    with st.spinner("Mengoptimalkan urutan per trip..."):
+        current_pos = driver_loc
+        trips = []
+        total_km = total_min = total_fuel = total_cost = 0
+
+        remaining = orders.copy()
         while remaining:
-            curr = route[-1]
-            nearest = min(remaining, key=lambda x: haversine(curr[1], curr[2], x[1], x[2]))
-            route.append(nearest)
+            nearest = min(remaining, key=lambda o: haversine(current_pos[0], current_pos[1], o["pickup"][0], o["pickup"][1]))
             remaining.remove(nearest)
 
-        total_km = sum(haversine(route[i][1], route[i][2], route[i+1][1], route[i+1][2]) for i in range(len(route)-1))
-        est_time_min = (total_km / 30) * 60
-        est_fuel_l = total_km / 35
-        est_cost = est_fuel_l * 13500
-        gmaps_url = generate_gmaps_url([(p[1], p[2]) for p in route])
+            leg1 = haversine(current_pos[0], current_pos[1], nearest["pickup"][0], nearest["pickup"][1])
+            leg2 = haversine(nearest["pickup"][0], nearest["pickup"][1], nearest["delivery"][0], nearest["delivery"][1])
+            trip_km = leg1 + leg2
+            trip_min = (trip_km / 30) * 60
+            trip_fuel = trip_km / 35
+            trip_cost = trip_fuel * 13500
 
-        route_data = {
-            "route": route,
-            "total_km": total_km,
-            "est_time_min": est_time_min,
-            "est_fuel_l": est_fuel_l,
-            "est_cost": est_cost,
-            "gmaps_url": gmaps_url,
-            "driver_loc": driver_location
+            trip_url = gmaps_trip(
+                current_pos[0], current_pos[1],
+                nearest["pickup"][0], nearest["pickup"][1],
+                nearest["delivery"][0], nearest["delivery"][1]
+            )
+
+            trips.append({
+                "order": nearest["label"],
+                "from": current_pos,
+                "pickup": nearest["pickup"],
+                "delivery": nearest["delivery"],
+                "km": trip_km,
+                "min": trip_min,
+                "fuel": trip_fuel,
+                "cost": trip_cost,
+                "url": trip_url
+            })
+
+            current_pos = nearest["delivery"]
+            total_km += trip_km
+            total_min += trip_min
+            total_fuel += trip_fuel
+            total_cost += trip_cost
+
+        result = {
+            "trips": trips,
+            "totals": {"km": total_km, "min": total_min, "fuel": total_fuel, "cost": total_cost},
+            "driver_start": driver_loc,
+            "driver_end": current_pos
         }
 
-        st.session_state.route_data = route_data
-        st.session_state.map_obj = rebuild_map(route_data)
-
-        # SIMPAN KE LOCALSTORAGE (HANYA DATA JSON!)
-        save_data = {
-            "route_data": route_data,
-            "driver_loc": driver_location
-        }
-        save_to_storage(save_data)
-
+        st.session_state.trips_data = result
+        save_to_storage({"trips_data": result, "driver_loc": driver_loc})
         st.balloons()
-        st.success("Rute selesai & disimpan otomatis 2 jam!")
+        st.success("Rute selesai! Semua link & marker bisa diklik!")
 
-# ----------------------------------------------------------------------------
-# TAMPILKAN HASIL
-# ----------------------------------------------------------------------------
-if st.session_state.route_data:
-    rd = st.session_state.route_data
-    col1, col2, col3, col4 = st.columns(4)
-    with col1: st.metric("Jarak", f"{rd['total_km']:.2f} km")
-    with col2: st.metric("Waktu", f"{rd['est_time_min']:.0f} menit")
-    with col3: st.metric("Bensin", f"{rd['est_fuel_l']:.2f} L")
-    with col4: st.metric("Biaya", f"Rp {rd['est_cost']:,.0f}")
+# ============================================================================
+# TAMPILKAN HASIL – SEMUA KLIKABLE!
+# ============================================================================
+if st.session_state.trips_data:
+    data = st.session_state.trips_data
+    trips = data["trips"]
+    totals = data["totals"]
 
-    st.markdown(f"""
-    <div style="text-align:center; margin:30px;">
-        <a href="{rd['gmaps_url']}" target="_blank">
-            <button style="background:#34A853; color:white; padding:18px 40px; font-size:20px; border:none; border-radius:12px;">
-            BUKA GOOGLE MAPS
-            </button>
-        </a>
-    </div>
-    """, unsafe_allow_html=True)
+    # METRICS
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: st.metric("Total Jarak", f"{totals['km']:.2f} km")
+    with c2: st.metric("Total Waktu", f"{totals['min']:.0f} menit")
+    with c3: st.metric("Bensin", f"{totals['fuel']:.2f} L")
+    with c4: st.metric("Biaya", f"Rp {totals['cost']:,.0f}")
 
-    st_folium(st.session_state.map_obj, width=1000, height=600)
+    # TABEL PER TRIP – LINK KLIKABLE
+    st.markdown("### Detail Per Trip")
+    table = []
+    for i, t in enumerate(trips):
+        table.append({
+            "Trip": i+1,
+            "Order": t["order"],
+            "Jarak": f"{t['km']:.2f} km",
+            "Waktu": f"{t['min']:.0f} mnt",
+            "Bensin": f"{t['fuel']:.2f} L",
+            "Biaya": f"Rp {t['cost']:,.0f}",
+            "BUKA TRIP": f"[BUKA DI GOOGLE MAPS]({t['url']})"
+        })
+    st.markdown(pd.DataFrame(table).to_html(escape=False, index=False), unsafe_allow_html=True)
 
-    col_a, col_b = st.columns([1, 4])
-    with col_a:
-        if st.button("CLEAR & BARU", type="secondary"):
+    # PETA – MARKER BISA DIKLIK!
+    m = folium.Map(location=driver_loc, zoom_start=12, tiles="CartoDB positron")
+
+    # Driver Start
+    folium.Marker(
+        driver_loc,
+        popup=folium.Popup(f"""
+            <b style="color:#0066FF;">DRIVER MULAI</b><br>
+            <a href="{gmaps_link(*driver_loc)}" target="_blank">Buka di Maps</a>
+        """, max_width=300),
+        tooltip="Driver Start",
+        icon=folium.Icon(color="blue", icon="motorcycle", prefix='fa')
+    ).add_to(m)
+
+    # Semua trip
+    route_coords = [driver_loc]
+    for i, t in enumerate(trips):
+        # Pickup
+        folium.Marker(
+            t["pickup"],
+            popup=folium.Popup(f"""
+                <b style="color:green;">Pickup {t['order']}</b><br>
+                <a href="{gmaps_link(*t['pickup'])}" target="_blank">Buka Lokasi Pickup</a>
+            """, max_width=300),
+            tooltip=f"Pickup {t['order']}",
+            icon=folium.Icon(color="green", icon="arrow-up", prefix='fa')
+        ).add_to(m)
+
+        # Delivery
+        folium.Marker(
+            t["delivery"],
+            popup=folium.Popup(f"""
+                <b style="color:red;">Delivery {t['order']}</b><br>
+                <a href="{gmaps_link(*t['delivery'])}" target="_blank">Buka Lokasi Delivery</a><br>
+                <hr>
+                <a href="{t['url']}" target="_blank" style="color:#34A853;font-weight:bold;">BUKA RUTE TRIP {i+1} DI GOOGLE MAPS</a>
+            """, max_width=300),
+            tooltip=f"Delivery {t['order']}",
+            icon=folium.Icon(color="red", icon="arrow-down", prefix='fa')
+        ).add_to(m)
+
+        route_coords.extend([t["pickup"], t["delivery"]])
+
+    # Garis rute
+    folium.PolyLine(route_coords, color="#0066FF", weight=7, opacity=0.9).add_to(m)
+
+    # Finish flag
+    folium.Marker(
+        data["driver_end"],
+        popup=folium.Popup(f"<b style='color:black;'>SELESAI DI SINI</b>", max_width=300),
+        icon=folium.Icon(color="black", icon="flag-checkered", prefix='fa')
+    ).add_to(m)
+
+    st.session_state.map_obj = m
+    st_folium(m, width=1000, height=600, key="map")
+
+    # CLEAR BUTTON
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("CLEAR SEMUA", type="secondary"):
             clear_storage()
             st.session_state.clear()
-            for key in required_keys:
-                st.session_state[key] = None
-            st.success("Semua data dihapus!")
             st.rerun()
-    with col_b:
-        st.caption("Data otomatis hilang setelah 2 jam")
+    with col2:
+        st.caption("Data otomatis hilang setelah 2 jam tidak aktif")
 
 else:
-    st.info("Isi data → Hitung → Refresh pun tetap ada!")
-    st.markdown("### Fitur: **Tidak pernah hilang selama 2 jam!**")
+    st.info("Isi data → Klik **HITUNG RUTE PER TRIP** → Semua bisa diklik!")
+    st.markdown("""
+    ### Fitur Keren v11.1:
+    - Link di tabel **bisa diklik**
+    - Marker di peta **bisa diklik → langsung buka Maps**
+    - Rute per trip realistis
+    - Data aman 2 jam
+    """)
+
