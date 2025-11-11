@@ -1,7 +1,19 @@
-streamlit==1.38.0
-folium==0.14.0
-streamlit-folium==0.22.0
-requests==2.32.3
-pandas==2.2.2
-numpy==2.1.1
-scikit-learn==1.5.2
+# Core Framework
+streamlit>=1.28.0
+
+# Map Visualization
+folium>=0.14.0
+streamlit-folium>=0.15.0
+
+# Data Processing
+pandas>=2.0.0
+
+# HTTP Requests
+requests>=2.31.0
+aiohttp>=3.9.0
+
+# Math & Algorithms
+numpy>=1.24.0
+
+# Optional: For better performance
+# scipy>=1.11.0  # If you want to use advanced optimization algorithms
